@@ -441,8 +441,10 @@ export default function Page() {
               {[-1, 0, 1].map((slot) => {
                 const slotHerb = HERBS[activeOrder[mod(pos + slot, len)]];
                 return (
+                  // key를 절대 위치(pos+slot)로 → 전환 커밋 후에도 같은 요소가 유지되어
+                  // 중앙 이미지의 src 교체(이전 이미지 반짝임)가 일어나지 않음
                   <div
-                    key={slot}
+                    key={pos + slot}
                     className="absolute inset-0 flex items-center justify-center"
                     style={{ transform: `translateX(${slot * 100}%)` }}
                   >
