@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HERBS } from "./herbs";
+import Exam from "./Exam";
 
 const STORAGE_KEY = "bonchoyakje:state";
 const SWIPE_THRESHOLD = 50;
@@ -75,8 +76,22 @@ export default function Page() {
   const [listOpen, setListOpen] = useState(false);
   const [listTab, setListTab] = useState<"all" | "fav">("all");
   const [query, setQuery] = useState("");
+  const [examOpen, setExamOpen] = useState(false);
+
+  // 카드 전환 애니메이션
+  const [dir, setDir] = useState<1 | -1>(1);
+  const [animTick, setAnimTick] = useState(0);
 
   const touchStartX = useRef<number | null>(null);
+  const suppressClickRef = useRef(false);
+
+  // 모든 사진 프리로드 (전환 시 흰 깜빡임 방지)
+  useEffect(() => {
+    HERBS.forEach((h) => {
+      const im = new window.Image();
+      im.src = h.img;
+    });
+  }, []);
 
   // 최초 마운트 시 localStorage 로드
   useEffect(() => {
@@ -144,6 +159,8 @@ export default function Page() {
   const go = useCallback(
     (delta: number) => {
       if (len === 0) return;
+      setDir(delta > 0 ? 1 : -1);
+      setAnimTick((t) => t + 1);
       setPos((p) => p + delta);
       setRevealed(showAnswer);
     },
@@ -227,8 +244,19 @@ export default function Page() {
     const dx = e.changedTouches[0].clientX - touchStartX.current;
     touchStartX.current = null;
     if (Math.abs(dx) < SWIPE_THRESHOLD) return;
-    // 왼쪽으로 스와이프(dx<0) → 다음, 오른쪽으로 스와이프 → 이전
-    if (dx < 0) goNext();
+    // 오른쪽으로 스와이프(dx>0) → 다음, 왼쪽으로 스와이프 → 이전
+    suppressClickRef.current = true; // 스와이프 뒤 합성 click 무시
+    if (dx > 0) goNext();
+    else goPrev();
+  };
+  // 사진 좌/우 절반 탭 → 이전/다음 (스와이프와 동일 방향)
+  const onImageClick = (e: React.MouseEvent) => {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (e.clientX - rect.left > rect.width / 2) goNext();
     else goPrev();
   };
 
@@ -256,6 +284,13 @@ export default function Page() {
             />
             정답 미리보기
           </label>
+          <button
+            type="button"
+            onClick={() => setExamOpen(true)}
+            className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm font-medium transition-colors hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+          >
+            시험
+          </button>
           <button
             type="button"
             onClick={() => setListOpen(true)}
@@ -308,23 +343,34 @@ export default function Page() {
             </span>
           </div>
 
-          {/* 사진 (스와이프 영역) + 별 버튼 */}
+          {/* 사진 (스와이프/탭 영역) + 별 버튼 */}
           <div
-            className="relative flex aspect-4/3 w-full items-center justify-center overflow-hidden rounded-xl border border-neutral-200 bg-white dark:border-neutral-800"
+            className="relative flex aspect-4/3 w-full cursor-pointer select-none items-center justify-center overflow-hidden rounded-xl border border-neutral-200 bg-white dark:border-neutral-800"
             onTouchStart={onTouchStart}
             onTouchEnd={onTouchEnd}
+            onClick={onImageClick}
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              key={herb.id}
-              src={herb.img}
-              alt="약재 사진"
-              className="h-full w-full object-contain"
-              draggable={false}
-            />
+            {/* 슬라이드되는 이미지 레이어 (key로 매 이동마다 애니메이션 재생) */}
+            <div
+              key={animTick}
+              className={`h-full w-full ${
+                dir === 1 ? "slide-in-right" : "slide-in-left"
+              }`}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={herb.img}
+                alt="약재 사진"
+                className="h-full w-full object-contain"
+                draggable={false}
+              />
+            </div>
             <button
               type="button"
-              onClick={() => herb && toggleFavorite(herb.id)}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (herb) toggleFavorite(herb.id);
+              }}
               aria-label={isFav ? "즐겨찾기 해제" : "즐겨찾기 추가"}
               aria-pressed={isFav}
               className="absolute right-2 top-2 flex h-10 w-10 items-center justify-center rounded-full bg-white/80 text-2xl shadow-sm backdrop-blur transition-colors hover:bg-white dark:bg-neutral-900/70 dark:hover:bg-neutral-900"
@@ -493,6 +539,9 @@ export default function Page() {
           </div>
         </div>
       )}
+
+      {/* 시험 오버레이 */}
+      {examOpen && <Exam onClose={() => setExamOpen(false)} />}
     </main>
   );
 }
