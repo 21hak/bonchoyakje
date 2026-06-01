@@ -423,7 +423,7 @@ export default function Page() {
           <div
             ref={containerRef}
             className="relative aspect-4/3 w-full select-none overflow-hidden rounded-xl border border-neutral-200 bg-white dark:border-neutral-800"
-            style={{ touchAction: "pan-y" }}
+            style={{ touchAction: "none" }}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
