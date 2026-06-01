@@ -2,7 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HERBS } from "./herbs";
-import { CATEGORIES, categoryIds } from "./categories";
+import {
+  CATEGORIES,
+  LOOKALIKE_SETS,
+  groupIds,
+  groupShortLabel,
+  isGroupKey,
+} from "./categories";
 import Exam from "./Exam";
 
 const STORAGE_KEY = "bonchoyakje:state";
@@ -13,7 +19,6 @@ function mod(n: number, m: number) {
 }
 
 const HERB_IDS = new Set(HERBS.map((h) => h.id));
-const CATEGORY_KEYS = new Set(CATEGORIES.map((c) => c.key));
 
 type SavedState = {
   order: number[];
@@ -64,7 +69,7 @@ function loadState(): SavedState | null {
       favorites,
       favoritesOnly: Boolean(s.favoritesOnly),
       category:
-        typeof s.category === "string" && CATEGORY_KEYS.has(s.category)
+        typeof s.category === "string" && isGroupKey(s.category)
           ? s.category
           : "",
     };
@@ -146,11 +151,8 @@ export default function Page() {
 
   // 활성 덱: 분류 + 즐겨찾기만 보기 필터를 합성
   const favSet = useMemo(() => new Set(favorites), [favorites]);
-  const catSet = useMemo(() => (category ? categoryIds(category) : null), [category]);
-  const catShort = useMemo(
-    () => CATEGORIES.find((c) => c.key === category)?.label.split(" (")[0] ?? "",
-    [category]
-  );
+  const catSet = useMemo(() => (category ? groupIds(category) : null), [category]);
+  const catShort = useMemo(() => groupShortLabel(category), [category]);
   const activeOrder = useMemo(
     () =>
       order.filter(
@@ -169,7 +171,7 @@ export default function Page() {
 
   // 목록 검색 결과 (원래 HERBS 순서 유지)
   const listCatSet = useMemo(
-    () => (listCategory ? categoryIds(listCategory) : null),
+    () => (listCategory ? groupIds(listCategory) : null),
     [listCategory]
   );
   const listResults = useMemo(() => {
@@ -334,74 +336,104 @@ export default function Page() {
   return (
     <main className="mx-auto flex min-h-full w-full max-w-2xl flex-col gap-4 px-4 py-5">
       {/* 상단 바 */}
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-lg font-semibold">약재 한자 퀴즈</h1>
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="flex cursor-pointer select-none items-center gap-1.5 text-sm">
-            <input
-              type="checkbox"
-              className="h-4 w-4 accent-neutral-700"
-              checked={showAnswer}
-              onChange={(e) => onToggleShowAnswer(e.target.checked)}
-            />
-            정답 미리보기
-          </label>
-          <button
-            type="button"
-            onClick={() => setExamOpen(true)}
-            className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm font-medium transition-colors hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
-          >
-            시험
-          </button>
+      <header className="flex flex-col gap-3">
+        {/* 1행: 제목 + 주요 액션 */}
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="text-lg font-semibold">약재 한자 퀴즈</h1>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setExamOpen(true)}
+              className="rounded-md border border-neutral-800 bg-neutral-800 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-neutral-700 dark:border-neutral-200 dark:bg-neutral-200 dark:text-neutral-900 dark:hover:bg-white"
+            >
+              시험
+            </button>
+            <button
+              type="button"
+              onClick={() => setListOpen(true)}
+              className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm font-medium transition-colors hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+            >
+              목록
+            </button>
+          </div>
+        </div>
+
+        {/* 2행: 컨트롤 바 (탐색/필터 | 보기) */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-neutral-200 bg-neutral-50 p-2 dark:border-neutral-800 dark:bg-neutral-900/50">
+          {/* 좌측: 필터 */}
           <select
             value={category}
             onChange={(e) => onChangeCategory(e.target.value)}
-            aria-label="분류 필터"
-            className="max-w-44 rounded-md border border-neutral-300 bg-white px-2 py-1.5 text-sm font-medium outline-none transition-colors hover:bg-neutral-100 focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-900 dark:hover:bg-neutral-800"
+            aria-label="분류 / 세트 필터"
+            className="max-w-52 rounded-md border border-neutral-300 bg-white px-2 py-1.5 text-sm font-medium outline-none transition-colors hover:bg-neutral-100 focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-900 dark:hover:bg-neutral-800"
           >
-            <option value="">전체 분류</option>
-            {CATEGORIES.map((c) => (
-              <option key={c.key} value={c.key}>
-                {c.label}
-              </option>
-            ))}
+            <option value="">전체 보기</option>
+            <optgroup label="닮은꼴 세트">
+              {LOOKALIKE_SETS.map((s) => (
+                <option key={s.key} value={s.key}>
+                  {s.label}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="효능 분류">
+              {CATEGORIES.map((c) => (
+                <option key={c.key} value={c.key}>
+                  {c.label}
+                </option>
+              ))}
+            </optgroup>
           </select>
-          <button
-            type="button"
-            onClick={() => setListOpen(true)}
-            className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm font-medium transition-colors hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
-          >
-            목록
-          </button>
           <button
             type="button"
             onClick={toggleFavoritesOnly}
             className={`rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
               favoritesOnly
                 ? "border-amber-500 bg-amber-400 text-neutral-900"
-                : "border-neutral-300 hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+                : "border-neutral-300 bg-white hover:bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-900 dark:hover:bg-neutral-800"
             }`}
           >
             ★ 즐겨찾기만 ({favorites.length})
           </button>
-          <button
-            type="button"
-            onClick={doShuffle}
-            className={`rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
-              shuffled
-                ? "border-neutral-800 bg-neutral-800 text-white"
-                : "border-neutral-300 hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
-            }`}
-          >
-            셔플
-          </button>
-          <button
-            type="button"
-            onClick={doReset}
-            className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm font-medium transition-colors hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
-          >
-            기본
-          </button>
+
+          {/* 구분선 + 우측: 보기 컨트롤 (남는 공간 오른쪽 정렬) */}
+          <div className="ml-auto flex items-center gap-3">
+            {/* 기본 | 셔플 세그먼트 */}
+            <div className="flex overflow-hidden rounded-md border border-neutral-300 dark:border-neutral-700">
+              <button
+                type="button"
+                onClick={doReset}
+                aria-pressed={!shuffled}
+                className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                  !shuffled
+                    ? "bg-neutral-800 text-white dark:bg-neutral-200 dark:text-neutral-900"
+                    : "bg-white hover:bg-neutral-100 dark:bg-neutral-900 dark:hover:bg-neutral-800"
+                }`}
+              >
+                기본
+              </button>
+              <button
+                type="button"
+                onClick={doShuffle}
+                aria-pressed={shuffled}
+                className={`border-l border-neutral-300 px-3 py-1.5 text-sm font-medium transition-colors dark:border-neutral-700 ${
+                  shuffled
+                    ? "bg-neutral-800 text-white dark:bg-neutral-200 dark:text-neutral-900"
+                    : "bg-white hover:bg-neutral-100 dark:bg-neutral-900 dark:hover:bg-neutral-800"
+                }`}
+              >
+                셔플
+              </button>
+            </div>
+            <label className="flex cursor-pointer select-none items-center gap-1.5 text-sm">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-neutral-700"
+                checked={showAnswer}
+                onChange={(e) => onToggleShowAnswer(e.target.checked)}
+              />
+              정답 미리보기
+            </label>
+          </div>
         </div>
       </header>
 
@@ -585,15 +617,24 @@ export default function Page() {
               <select
                 value={listCategory}
                 onChange={(e) => setListCategory(e.target.value)}
-                aria-label="분류 필터"
+                aria-label="분류 / 세트 필터"
                 className="w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-900"
               >
                 <option value="">전체 분류</option>
-                {CATEGORIES.map((c) => (
-                  <option key={c.key} value={c.key}>
-                    {c.label}
-                  </option>
-                ))}
+                <optgroup label="닮은꼴 세트">
+                  {LOOKALIKE_SETS.map((s) => (
+                    <option key={s.key} value={s.key}>
+                      {s.label}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="효능 분류">
+                  {CATEGORIES.map((c) => (
+                    <option key={c.key} value={c.key}>
+                      {c.label}
+                    </option>
+                  ))}
+                </optgroup>
               </select>
             </div>
 
