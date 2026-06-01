@@ -2,12 +2,18 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HERBS } from "./herbs";
+import { CATEGORIES, categoryIds } from "./categories";
 import Exam from "./Exam";
 
 const STORAGE_KEY = "bonchoyakje:state";
-const SWIPE_THRESHOLD = 50;
+
+// 순환 모듈러 (음수 안전)
+function mod(n: number, m: number) {
+  return ((n % m) + m) % m;
+}
 
 const HERB_IDS = new Set(HERBS.map((h) => h.id));
+const CATEGORY_KEYS = new Set(CATEGORIES.map((c) => c.key));
 
 type SavedState = {
   order: number[];
@@ -16,6 +22,7 @@ type SavedState = {
   pos: number;
   favorites: number[];
   favoritesOnly: boolean;
+  category: string;
 };
 
 function defaultOrder(): number[] {
@@ -56,6 +63,10 @@ function loadState(): SavedState | null {
       pos: Number.isInteger(s.pos) ? (s.pos as number) : 0,
       favorites,
       favoritesOnly: Boolean(s.favoritesOnly),
+      category:
+        typeof s.category === "string" && CATEGORY_KEYS.has(s.category)
+          ? s.category
+          : "",
     };
   } catch {
     return null;
@@ -71,19 +82,24 @@ export default function Page() {
   const [revealed, setRevealed] = useState(false);
   const [favorites, setFavorites] = useState<number[]>([]);
   const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [category, setCategory] = useState<string>(""); // ""=전체
 
   // 목록 오버레이 (휘발성 UI 상태 — localStorage 저장 안 함)
   const [listOpen, setListOpen] = useState(false);
   const [listTab, setListTab] = useState<"all" | "fav">("all");
   const [query, setQuery] = useState("");
+  const [listCategory, setListCategory] = useState<string>(""); // ""=전체
   const [examOpen, setExamOpen] = useState(false);
 
-  // 카드 전환 애니메이션
-  const [dir, setDir] = useState<1 | -1>(1);
-  const [animTick, setAnimTick] = useState(0);
+  // Carousel 드래그 상태
+  const [dragX, setDragX] = useState(0);
+  const [animating, setAnimating] = useState(false);
 
-  const touchStartX = useRef<number | null>(null);
-  const suppressClickRef = useRef(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const startXRef = useRef(0);
+  const widthRef = useRef(0);
+  const draggingRef = useRef(false);
+  const pendingRef = useRef(0); // transitionEnd 시 커밋할 방향
 
   // 모든 사진 프리로드 (전환 시 흰 깜빡임 방지)
   useEffect(() => {
@@ -104,6 +120,7 @@ export default function Page() {
       setRevealed(s.showAnswer);
       setFavorites(s.favorites);
       setFavoritesOnly(s.favoritesOnly);
+      setCategory(s.category);
     }
     setMounted(true);
   }, []);
@@ -118,22 +135,30 @@ export default function Page() {
       pos,
       favorites,
       favoritesOnly,
+      category,
     };
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
     } catch {
       // 저장 실패는 무시
     }
-  }, [mounted, order, shuffled, showAnswer, pos, favorites, favoritesOnly]);
+  }, [mounted, order, shuffled, showAnswer, pos, favorites, favoritesOnly, category]);
 
-  // 활성 덱: 즐겨찾기만 보기면 즐겨찾기한 약재로 필터
+  // 활성 덱: 분류 + 즐겨찾기만 보기 필터를 합성
   const favSet = useMemo(() => new Set(favorites), [favorites]);
+  const catSet = useMemo(() => (category ? categoryIds(category) : null), [category]);
+  const catShort = useMemo(
+    () => CATEGORIES.find((c) => c.key === category)?.label.split(" (")[0] ?? "",
+    [category]
+  );
   const activeOrder = useMemo(
     () =>
-      favoritesOnly
-        ? order.filter((i) => favSet.has(HERBS[i].id))
-        : order,
-    [favoritesOnly, order, favSet]
+      order.filter(
+        (i) =>
+          (!favoritesOnly || favSet.has(HERBS[i].id)) &&
+          (!catSet || catSet.has(HERBS[i].id))
+      ),
+    [favoritesOnly, order, favSet, catSet]
   );
 
   const len = activeOrder.length;
@@ -143,31 +168,56 @@ export default function Page() {
   const isFav = herb ? favSet.has(herb.id) : false;
 
   // 목록 검색 결과 (원래 HERBS 순서 유지)
+  const listCatSet = useMemo(
+    () => (listCategory ? categoryIds(listCategory) : null),
+    [listCategory]
+  );
   const listResults = useMemo(() => {
     const q = query.trim().toLowerCase().replace(/\s+/g, "");
     return HERBS.filter((h) => {
       if (listTab === "fav" && !favSet.has(h.id)) return false;
+      if (listCatSet && !listCatSet.has(h.id)) return false;
       if (!q) return true;
       return (
         h.korean.toLowerCase().replace(/\s+/g, "").includes(q) ||
         h.hanja.toLowerCase().includes(q)
       );
     });
-  }, [query, listTab, favSet]);
+  }, [query, listTab, favSet, listCatSet]);
 
-  // 이동 (순환). pos는 그대로 증감하고 표시 시 모듈러로 순환.
-  const go = useCallback(
+  // Carousel 전환: 다음(+1)이면 다음 슬라이드(+W)를 중앙으로 → 그룹 -W로 애니메이션.
+  // delta 0 = 제자리 스냅백. transitionEnd 에서 pos 커밋 + dragX 리셋(깜빡임/점프 없음).
+  const animateTo = useCallback(
     (delta: number) => {
-      if (len === 0) return;
-      setDir(delta > 0 ? 1 : -1);
-      setAnimTick((t) => t + 1);
+      if (animating || len === 0) return;
+      if (delta === 0) {
+        if (dragX === 0) return; // 움직임 없으면 아무것도 안 함
+        pendingRef.current = 0;
+        setAnimating(true);
+        setDragX(0);
+        return;
+      }
+      const W = containerRef.current?.offsetWidth ?? 0;
+      pendingRef.current = delta;
+      setAnimating(true);
+      setDragX(delta > 0 ? -W : W);
+    },
+    [animating, len, dragX]
+  );
+  const goPrev = useCallback(() => animateTo(-1), [animateTo]);
+  const goNext = useCallback(() => animateTo(1), [animateTo]);
+
+  const onCarouselTransitionEnd = (e: React.TransitionEvent) => {
+    if (e.propertyName !== "transform") return;
+    const delta = pendingRef.current;
+    pendingRef.current = 0;
+    if (delta !== 0) {
       setPos((p) => p + delta);
       setRevealed(showAnswer);
-    },
-    [len, showAnswer]
-  );
-  const goPrev = useCallback(() => go(-1), [go]);
-  const goNext = useCallback(() => go(1), [go]);
+    }
+    setAnimating(false);
+    setDragX(0);
+  };
 
   const toggleFavorite = useCallback((id: number) => {
     setFavorites((prev) =>
@@ -193,6 +243,7 @@ export default function Page() {
   // 키보드: ← → 이동, f 즐겨찾기 토글 (목록 열림 중엔 Esc만)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (examOpen) return; // 시험 모달이 열려 있으면 carousel 조작 막기
       if (listOpen) {
         if (e.key === "Escape") setListOpen(false);
         return;
@@ -209,7 +260,7 @@ export default function Page() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [listOpen, goNext, goPrev, toggleFavorite, herb]);
+  }, [examOpen, listOpen, goNext, goPrev, toggleFavorite, herb]);
 
   const doShuffle = () => {
     setOrder((o) => shuffle(o));
@@ -231,33 +282,44 @@ export default function Page() {
     setRevealed(showAnswer);
   };
 
+  const onChangeCategory = (key: string) => {
+    setCategory(key);
+    setPos(0);
+    setRevealed(showAnswer);
+  };
+
   const onToggleShowAnswer = (checked: boolean) => {
     setShowAnswer(checked);
     setRevealed(checked);
   };
 
-  const onTouchStart = (e: React.TouchEvent) => {
-    touchStartX.current = e.touches[0].clientX;
+  // Carousel 드래그 (Pointer 이벤트 = 마우스 + 터치 통합)
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (animating || len === 0) return;
+    draggingRef.current = true;
+    startXRef.current = e.clientX;
+    widthRef.current = containerRef.current?.offsetWidth ?? 0;
+    e.currentTarget.setPointerCapture(e.pointerId);
   };
-  const onTouchEnd = (e: React.TouchEvent) => {
-    if (touchStartX.current === null) return;
-    const dx = e.changedTouches[0].clientX - touchStartX.current;
-    touchStartX.current = null;
-    if (Math.abs(dx) < SWIPE_THRESHOLD) return;
-    // 오른쪽으로 스와이프(dx>0) → 다음, 왼쪽으로 스와이프 → 이전
-    suppressClickRef.current = true; // 스와이프 뒤 합성 click 무시
-    if (dx > 0) goNext();
-    else goPrev();
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!draggingRef.current) return;
+    setDragX(e.clientX - startXRef.current);
   };
-  // 사진 좌/우 절반 탭 → 이전/다음 (스와이프와 동일 방향)
-  const onImageClick = (e: React.MouseEvent) => {
-    if (suppressClickRef.current) {
-      suppressClickRef.current = false;
-      return;
+  const onPointerUp = (e: React.PointerEvent) => {
+    if (!draggingRef.current) return;
+    draggingRef.current = false;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // 이미 해제됐을 수 있음
     }
-    const rect = e.currentTarget.getBoundingClientRect();
-    if (e.clientX - rect.left > rect.width / 2) goNext();
-    else goPrev();
+    const dx = e.clientX - startXRef.current;
+    const W = widthRef.current || 1;
+    const threshold = Math.max(40, W * 0.18);
+    // 오른쪽으로 끌면(dx>0) 이전, 왼쪽으로 끌면 다음
+    if (dx >= threshold) animateTo(-1);
+    else if (dx <= -threshold) animateTo(1);
+    else animateTo(0); // 부족하면 제자리 복귀
   };
 
   // 하이드레이션 불일치 방지: 마운트 전에는 최소 골격만
@@ -291,6 +353,19 @@ export default function Page() {
           >
             시험
           </button>
+          <select
+            value={category}
+            onChange={(e) => onChangeCategory(e.target.value)}
+            aria-label="분류 필터"
+            className="max-w-44 rounded-md border border-neutral-300 bg-white px-2 py-1.5 text-sm font-medium outline-none transition-colors hover:bg-neutral-100 focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-900 dark:hover:bg-neutral-800"
+          >
+            <option value="">전체 분류</option>
+            {CATEGORIES.map((c) => (
+              <option key={c.key} value={c.key}>
+                {c.label}
+              </option>
+            ))}
+          </select>
           <button
             type="button"
             onClick={() => setListOpen(true)}
@@ -339,41 +414,59 @@ export default function Page() {
             </span>
             <span>
               {herb.week}주차
+              {catShort ? ` · ${catShort}` : ""}
               {favoritesOnly ? " · 즐겨찾기" : shuffled ? " · 섞임" : ""}
             </span>
           </div>
 
-          {/* 사진 (스와이프/탭 영역) + 별 버튼 */}
+          {/* 사진 Carousel (드래그/스와이프) + 별 버튼 */}
           <div
-            className="relative flex aspect-4/3 w-full cursor-pointer select-none items-center justify-center overflow-hidden rounded-xl border border-neutral-200 bg-white dark:border-neutral-800"
-            onTouchStart={onTouchStart}
-            onTouchEnd={onTouchEnd}
-            onClick={onImageClick}
+            ref={containerRef}
+            className="relative aspect-4/3 w-full select-none overflow-hidden rounded-xl border border-neutral-200 bg-white dark:border-neutral-800"
+            style={{ touchAction: "pan-y" }}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
           >
-            {/* 슬라이드되는 이미지 레이어 (key로 매 이동마다 애니메이션 재생) */}
+            {/* 슬라이드 그룹: 이전/현재/다음 3장만 렌더, 모듈러로 순환 */}
             <div
-              key={animTick}
-              className={`h-full w-full ${
-                dir === 1 ? "slide-in-right" : "slide-in-left"
-              }`}
+              className="absolute inset-0"
+              style={{
+                transform: `translateX(${dragX}px)`,
+                transition: animating ? "transform 0.25s ease-out" : "none",
+              }}
+              onTransitionEnd={onCarouselTransitionEnd}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={herb.img}
-                alt="약재 사진"
-                className="h-full w-full object-contain"
-                draggable={false}
-              />
+              {[-1, 0, 1].map((slot) => {
+                const slotHerb = HERBS[activeOrder[mod(pos + slot, len)]];
+                return (
+                  <div
+                    key={slot}
+                    className="absolute inset-0 flex items-center justify-center"
+                    style={{ transform: `translateX(${slot * 100}%)` }}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={slotHerb.img}
+                      alt={slot === 0 ? "약재 사진" : ""}
+                      className="h-full w-full object-contain"
+                      draggable={false}
+                    />
+                  </div>
+                );
+              })}
             </div>
             <button
               type="button"
+              onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
                 if (herb) toggleFavorite(herb.id);
               }}
               aria-label={isFav ? "즐겨찾기 해제" : "즐겨찾기 추가"}
               aria-pressed={isFav}
-              className="absolute right-2 top-2 flex h-10 w-10 items-center justify-center rounded-full bg-white/80 text-2xl shadow-sm backdrop-blur transition-colors hover:bg-white dark:bg-neutral-900/70 dark:hover:bg-neutral-900"
+              className="absolute right-2 top-2 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/80 text-2xl shadow-sm backdrop-blur transition-colors hover:bg-white dark:bg-neutral-900/70 dark:hover:bg-neutral-900"
             >
               <span className={isFav ? "text-amber-400" : "text-neutral-300"}>
                 {isFav ? "★" : "☆"}
@@ -419,15 +512,20 @@ export default function Page() {
           </div>
         </>
       ) : (
-        // 즐겨찾기만 보기인데 즐겨찾기가 없을 때
+        // 필터(분류·즐겨찾기) 결과가 비었을 때
         <div className="mt-10 flex flex-col items-center justify-center gap-4 text-center">
-          <p className="text-neutral-500">즐겨찾기한 약재가 없습니다.</p>
+          <p className="text-neutral-500">조건에 맞는 약재가 없습니다.</p>
           <button
             type="button"
-            onClick={toggleFavoritesOnly}
+            onClick={() => {
+              setFavoritesOnly(false);
+              setCategory("");
+              setPos(0);
+              setRevealed(showAnswer);
+            }}
             className="rounded-md border border-neutral-300 px-4 py-2 text-sm font-medium transition-colors hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
           >
-            전체 보기로 전환
+            필터 초기화
           </button>
         </div>
       )}
@@ -472,8 +570,8 @@ export default function Page() {
               </button>
             </div>
 
-            {/* 검색 */}
-            <div className="border-b border-neutral-200 p-3 dark:border-neutral-800">
+            {/* 검색 + 분류 필터 */}
+            <div className="flex flex-col gap-2 border-b border-neutral-200 p-3 dark:border-neutral-800">
               <input
                 type="search"
                 value={query}
@@ -482,6 +580,19 @@ export default function Page() {
                 autoFocus
                 className="w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-900"
               />
+              <select
+                value={listCategory}
+                onChange={(e) => setListCategory(e.target.value)}
+                aria-label="분류 필터"
+                className="w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-900"
+              >
+                <option value="">전체 분류</option>
+                {CATEGORIES.map((c) => (
+                  <option key={c.key} value={c.key}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
             </div>
 
             {/* 결과 목록 */}
@@ -541,7 +652,9 @@ export default function Page() {
       )}
 
       {/* 시험 오버레이 */}
-      {examOpen && <Exam onClose={() => setExamOpen(false)} />}
+      {examOpen && (
+        <Exam onClose={() => setExamOpen(false)} favorites={favorites} />
+      )}
     </main>
   );
 }

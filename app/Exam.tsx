@@ -24,7 +24,13 @@ function chunk(arr: number[], size: number): number[][] {
   return out;
 }
 
-export default function Exam({ onClose }: { onClose: () => void }) {
+export default function Exam({
+  onClose,
+  favorites,
+}: {
+  onClose: () => void;
+  favorites: number[];
+}) {
   const [phase, setPhase] = useState<Phase>("setup");
 
   // 설정
@@ -32,6 +38,13 @@ export default function Exam({ onClose }: { onClose: () => void }) {
   const [seconds, setSeconds] = useState(15);
   const [countMode, setCountMode] = useState<CountMode>("all");
   const [customCount, setCustomCount] = useState(20);
+  const [favOnly, setFavOnly] = useState(false);
+
+  // 출제 풀(약재 인덱스): 즐겨찾기만이면 즐겨찾기한 약재로 한정
+  const favSet = new Set(favorites);
+  const poolIdx = favOnly
+    ? HERBS.map((_, i) => i).filter((i) => favSet.has(HERBS[i].id))
+    : HERBS.map((_, i) => i);
 
   // 출제 결과 (약재 인덱스의 라운드별 배열)
   const [rounds, setRounds] = useState<number[][]>([]);
@@ -41,12 +54,13 @@ export default function Exam({ onClose }: { onClose: () => void }) {
   const startRef = useRef(0);
 
   const startExam = () => {
+    if (poolIdx.length === 0) return;
     const safePerRound = Math.max(1, Math.floor(perRound) || 1);
     const total =
       countMode === "all"
-        ? HERBS.length
-        : Math.min(HERBS.length, Math.max(1, Math.floor(customCount) || 1));
-    const picked = shuffle(HERBS.map((_, i) => i)).slice(0, total);
+        ? poolIdx.length
+        : Math.min(poolIdx.length, Math.max(1, Math.floor(customCount) || 1));
+    const picked = shuffle(poolIdx).slice(0, total);
     setRounds(chunk(picked, safePerRound));
     setCurrentRound(0);
     setProgress(0);
@@ -147,6 +161,16 @@ export default function Exam({ onClose }: { onClose: () => void }) {
                 />
               </label>
 
+              <label className="flex cursor-pointer select-none items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-neutral-700"
+                  checked={favOnly}
+                  onChange={(e) => setFavOnly(e.target.checked)}
+                />
+                즐겨찾기한 약재만 ({favorites.length}개)
+              </label>
+
               <div className="flex flex-col gap-2">
                 <span className="text-sm font-medium">시험 약재 개수</span>
                 <label className="flex cursor-pointer select-none items-center gap-2 text-sm">
@@ -157,7 +181,7 @@ export default function Exam({ onClose }: { onClose: () => void }) {
                     checked={countMode === "all"}
                     onChange={() => setCountMode("all")}
                   />
-                  전체 ({HERBS.length}개)
+                  전체 ({poolIdx.length}개)
                 </label>
                 <label className="flex cursor-pointer select-none items-center gap-2 text-sm">
                   <input
@@ -171,7 +195,7 @@ export default function Exam({ onClose }: { onClose: () => void }) {
                   <input
                     type="number"
                     min={1}
-                    max={HERBS.length}
+                    max={poolIdx.length}
                     value={customCount}
                     onChange={(e) => setCustomCount(Number(e.target.value))}
                     onFocus={() => setCountMode("custom")}
@@ -181,10 +205,16 @@ export default function Exam({ onClose }: { onClose: () => void }) {
                 </label>
               </div>
 
+              {favOnly && poolIdx.length === 0 && (
+                <p className="text-sm text-neutral-500">
+                  즐겨찾기한 약재가 없습니다. 즐겨찾기를 추가하거나 체크를 해제하세요.
+                </p>
+              )}
+
               <button
                 type="button"
                 onClick={startExam}
-                disabled={perRound < 1 || seconds < 1}
+                disabled={perRound < 1 || seconds < 1 || poolIdx.length === 0}
                 className="mt-2 rounded-md border border-neutral-800 bg-neutral-800 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-neutral-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-neutral-200 dark:bg-neutral-200 dark:text-neutral-900 dark:hover:bg-white"
               >
                 시험 시작
