@@ -5,8 +5,10 @@ import { HERBS } from "./herbs";
 import {
   CATEGORIES,
   LOOKALIKE_SETS,
+  GROUPED_ORDER,
   groupIds,
   groupShortLabel,
+  groupTip,
   isGroupKey,
 } from "./categories";
 import Exam from "./Exam";
@@ -20,8 +22,11 @@ function mod(n: number, m: number) {
 
 const HERB_IDS = new Set(HERBS.map((h) => h.id));
 
+type OrderMode = "default" | "group";
+
 type SavedState = {
   order: number[];
+  orderMode: OrderMode;
   shuffled: boolean;
   showAnswer: boolean;
   pos: number;
@@ -34,6 +39,18 @@ function defaultOrder(): number[] {
   return HERBS.map((_, i) => i);
 }
 
+// 외형 그룹 순서대로 나열한 HERBS 인덱스 배열 (묶어 보기). id→index 변환.
+function groupedOrder(): number[] {
+  const idToIndex = new Map(HERBS.map((h, i) => [h.id, i]));
+  const indices = GROUPED_ORDER.map((id) => idToIndex.get(id)).filter(
+    (i): i is number => i !== undefined
+  );
+  // 안전장치: 전체를 1회씩 덮지 못하면 기본 순서로 폴백
+  return indices.length === HERBS.length
+    ? indices
+    : defaultOrder();
+}
+
 // Fisher–Yates 셔플 (원본 불변)
 function shuffle(arr: number[]): number[] {
   const a = arr.slice();
@@ -42,6 +59,17 @@ function shuffle(arr: number[]): number[] {
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
+}
+
+// 묶음 셔플: 그룹 순서를 섞고, 각 그룹 내부 멤버도 섞어 이어붙임 (그룹은 붙어 다님).
+function groupedShuffle(): number[] {
+  const idToIndex = new Map(HERBS.map((h, i) => [h.id, i]));
+  const groupOrder = shuffle(LOOKALIKE_SETS.map((_, i) => i));
+  const ids = groupOrder.flatMap((gi) => shuffle(LOOKALIKE_SETS[gi].ids));
+  const indices = ids
+    .map((id) => idToIndex.get(id))
+    .filter((i): i is number => i !== undefined);
+  return indices.length === HERBS.length ? indices : defaultOrder();
 }
 
 function loadState(): SavedState | null {
@@ -61,9 +89,16 @@ function loadState(): SavedState | null {
     const favorites = Array.isArray(s.favorites)
       ? s.favorites.filter((n) => Number.isInteger(n) && HERB_IDS.has(n))
       : [];
+    // orderMode: group 이면 group, 그 외(과거 "shuffle"·"default"·없음)는 default.
+    // shuffled: 명시 boolean 우선, 없으면 과거 orderMode==="shuffle"에서 유도.
+    const rawMode = s.orderMode as string | undefined;
+    const orderMode: OrderMode = rawMode === "group" ? "group" : "default";
+    const shuffled =
+      typeof s.shuffled === "boolean" ? s.shuffled : rawMode === "shuffle";
     return {
       order: s.order,
-      shuffled: Boolean(s.shuffled),
+      orderMode,
+      shuffled,
       showAnswer: Boolean(s.showAnswer),
       pos: Number.isInteger(s.pos) ? (s.pos as number) : 0,
       favorites,
@@ -81,6 +116,7 @@ function loadState(): SavedState | null {
 export default function Page() {
   const [mounted, setMounted] = useState(false);
   const [order, setOrder] = useState<number[]>(defaultOrder);
+  const [orderMode, setOrderMode] = useState<OrderMode>("default");
   const [shuffled, setShuffled] = useState(false);
   const [showAnswer, setShowAnswer] = useState(false);
   const [pos, setPos] = useState(0);
@@ -119,6 +155,7 @@ export default function Page() {
     const s = loadState();
     if (s) {
       setOrder(s.order);
+      setOrderMode(s.orderMode);
       setShuffled(s.shuffled);
       setShowAnswer(s.showAnswer);
       setPos(s.pos);
@@ -135,6 +172,7 @@ export default function Page() {
     if (!mounted) return;
     const s: SavedState = {
       order,
+      orderMode,
       shuffled,
       showAnswer,
       pos,
@@ -147,12 +185,13 @@ export default function Page() {
     } catch {
       // 저장 실패는 무시
     }
-  }, [mounted, order, shuffled, showAnswer, pos, favorites, favoritesOnly, category]);
+  }, [mounted, order, orderMode, shuffled, showAnswer, pos, favorites, favoritesOnly, category]);
 
   // 활성 덱: 분류 + 즐겨찾기만 보기 필터를 합성
   const favSet = useMemo(() => new Set(favorites), [favorites]);
   const catSet = useMemo(() => (category ? groupIds(category) : null), [category]);
   const catShort = useMemo(() => groupShortLabel(category), [category]);
+  const selectedTip = useMemo(() => groupTip(category), [category]);
   const activeOrder = useMemo(
     () =>
       order.filter(
@@ -264,16 +303,29 @@ export default function Page() {
     return () => window.removeEventListener("keydown", onKey);
   }, [examOpen, listOpen, goNext, goPrev, toggleFavorite, herb]);
 
-  const doShuffle = () => {
-    setOrder((o) => shuffle(o));
-    setShuffled(true);
+  // 기본 모드: 원래 순서
+  const doReset = () => {
+    setOrder(defaultOrder());
+    setOrderMode("default");
+    setShuffled(false);
     setPos(0);
     setRevealed(showAnswer);
   };
 
-  const doReset = () => {
-    setOrder(defaultOrder());
+  // 묶음 모드: 외형 그룹 순서로 정렬
+  const doGroup = () => {
+    setOrder(groupedOrder());
+    setOrderMode("group");
     setShuffled(false);
+    setPos(0);
+    setRevealed(showAnswer);
+  };
+
+  // 셔플 버튼: 현재 모드 구조를 유지한 채 순서만 무작위화
+  // 기본 모드=전체 셔플 / 묶음 모드=그룹 순서·그룹 내부 모두 셔플
+  const doShuffle = () => {
+    setOrder(orderMode === "group" ? groupedShuffle() : shuffle(defaultOrder()));
+    setShuffled(true);
     setPos(0);
     setRevealed(showAnswer);
   };
@@ -371,7 +423,7 @@ export default function Page() {
             <optgroup label="닮은꼴 세트">
               {LOOKALIKE_SETS.map((s) => (
                 <option key={s.key} value={s.key}>
-                  {s.label}
+                  {s.label} ({s.ids.length})
                 </option>
               ))}
             </optgroup>
@@ -397,33 +449,45 @@ export default function Page() {
 
           {/* 구분선 + 우측: 보기 컨트롤 (남는 공간 오른쪽 정렬) */}
           <div className="ml-auto flex items-center gap-3">
-            {/* 기본 | 셔플 세그먼트 */}
+            {/* 기본 | 묶음 모드 세그먼트 */}
             <div className="flex overflow-hidden rounded-md border border-neutral-300 dark:border-neutral-700">
-              <button
-                type="button"
-                onClick={doReset}
-                aria-pressed={!shuffled}
-                className={`px-3 py-1.5 text-sm font-medium transition-colors ${
-                  !shuffled
-                    ? "bg-neutral-800 text-white dark:bg-neutral-200 dark:text-neutral-900"
-                    : "bg-white hover:bg-neutral-100 dark:bg-neutral-900 dark:hover:bg-neutral-800"
-                }`}
-              >
-                기본
-              </button>
-              <button
-                type="button"
-                onClick={doShuffle}
-                aria-pressed={shuffled}
-                className={`border-l border-neutral-300 px-3 py-1.5 text-sm font-medium transition-colors dark:border-neutral-700 ${
-                  shuffled
-                    ? "bg-neutral-800 text-white dark:bg-neutral-200 dark:text-neutral-900"
-                    : "bg-white hover:bg-neutral-100 dark:bg-neutral-900 dark:hover:bg-neutral-800"
-                }`}
-              >
-                셔플
-              </button>
+              {(
+                [
+                  { mode: "default", label: "기본", onClick: doReset },
+                  { mode: "group", label: "유사한거 연달아서", onClick: doGroup },
+                ] as const
+              ).map((seg, i) => (
+                <button
+                  key={seg.mode}
+                  type="button"
+                  onClick={seg.onClick}
+                  aria-pressed={orderMode === seg.mode}
+                  className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                    i > 0 ? "border-l border-neutral-300 dark:border-neutral-700" : ""
+                  } ${
+                    orderMode === seg.mode
+                      ? "bg-neutral-800 text-white dark:bg-neutral-200 dark:text-neutral-900"
+                      : "bg-white hover:bg-neutral-100 dark:bg-neutral-900 dark:hover:bg-neutral-800"
+                  }`}
+                >
+                  {seg.label}
+                </button>
+              ))}
             </div>
+            {/* 셔플 버튼 (현재 모드 기준) */}
+            <button
+              type="button"
+              onClick={doShuffle}
+              aria-pressed={shuffled}
+              title={orderMode === "group" ? "그룹 순서·내부 모두 섞기" : "전체 섞기"}
+              className={`rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
+                shuffled
+                  ? "border-neutral-800 bg-neutral-800 text-white dark:border-neutral-200 dark:bg-neutral-200 dark:text-neutral-900"
+                  : "border-neutral-300 bg-white hover:bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-900 dark:hover:bg-neutral-800"
+              }`}
+            >
+              🔀 셔플
+            </button>
             <label className="flex cursor-pointer select-none items-center gap-1.5 text-sm">
               <input
                 type="checkbox"
@@ -447,7 +511,9 @@ export default function Page() {
             <span>
               {herb.week}주차
               {catShort ? ` · ${catShort}` : ""}
-              {favoritesOnly ? " · 즐겨찾기" : shuffled ? " · 섞임" : ""}
+              {favoritesOnly ? " · 즐겨찾기" : ""}
+              {orderMode === "group" ? " · 묶음" : ""}
+              {shuffled ? " · 섞임" : ""}
             </span>
           </div>
 
@@ -526,6 +592,15 @@ export default function Page() {
               <span className="text-sm text-neutral-400">탭하여 정답 보기</span>
             )}
           </button>
+
+          {/* 선택한 닮은꼴 세트의 구별 포인트 */}
+          {selectedTip && (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
+              <span className="font-semibold">구별 포인트 · {catShort}</span>
+              <br />
+              {selectedTip}
+            </p>
+          )}
 
           {/* 이전 / 다음 버튼 (순환) */}
           <div className="mt-auto flex items-center justify-between gap-3 pt-2">
@@ -624,7 +699,7 @@ export default function Page() {
                 <optgroup label="닮은꼴 세트">
                   {LOOKALIKE_SETS.map((s) => (
                     <option key={s.key} value={s.key}>
-                      {s.label}
+                      {s.label} ({s.ids.length})
                     </option>
                   ))}
                 </optgroup>
