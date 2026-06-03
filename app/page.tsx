@@ -12,6 +12,7 @@ import {
   isGroupKey,
 } from "./categories";
 import Exam from "./Exam";
+import WritingPad from "./WritingPad";
 
 const STORAGE_KEY = "bonchoyakje:state";
 
@@ -386,7 +387,8 @@ export default function Page() {
   }
 
   return (
-    <main className="mx-auto flex min-h-full w-full max-w-2xl flex-col gap-4 px-4 py-5">
+    <div className="mx-auto flex min-h-full w-full max-w-6xl items-stretch gap-4 px-4 py-5">
+      <main className="flex min-h-full w-full max-w-2xl flex-1 flex-col gap-4">
       {/* 상단 바 */}
       <header className="flex flex-col gap-3">
         {/* 1행: 제목 + 주요 액션 */}
@@ -773,6 +775,12 @@ export default function Page() {
       {examOpen && (
         <Exam onClose={() => setExamOpen(false)} favorites={favorites} />
       )}
-    </main>
+      </main>
+
+      {/* 오른쪽 필기 패드 (태블릿/넓은 화면) */}
+      <aside className="hidden md:flex md:flex-1">
+        <WritingPad resetKey={herb ? herb.id : 0} />
+      </aside>
+    </div>
   );
 }

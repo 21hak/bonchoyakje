@@ -10,6 +10,7 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: projectRoot,
   },
+  allowedDevOrigins: ['192.168.0.10']
 };
 
 export default nextConfig;
