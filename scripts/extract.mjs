@@ -4,6 +4,7 @@
 //
 // 필요 도구: poppler (pdfimages, pdftotext)
 // 실행: node scripts/extract.mjs
+// 주의: public/herbs 를 통째로 지우므로, 실행 후 scripts/extract2.mjs(2학기)도 다시 실행해야 한다.
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -103,20 +104,25 @@ function main() {
     (h) =>
       `  { id: ${h.id}, img: ${JSON.stringify(h.img)}, hanja: ${JSON.stringify(
         h.hanja
-      )}, korean: ${JSON.stringify(h.korean)}, week: ${h.week} },`
+      )}, korean: ${JSON.stringify(h.korean)}, semester: 1, week: ${h.week} },`
   );
   const ts = `// 이 파일은 scripts/extract.mjs 로 자동 생성됩니다. 직접 수정하지 마세요.
+import { HERBS_2 } from "./herbs2";
+
 export type Herb = {
   id: number;
   img: string;
   hanja: string;
   korean: string;
-  week: 12 | 13;
+  semester: 1 | 2;
+  week?: 12 | 13; // 1학기만
 };
 
-export const HERBS: Herb[] = [
+const HERBS_1: Herb[] = [
 ${lines.join("\n")}
 ];
+
+export const HERBS: Herb[] = [...HERBS_1, ...HERBS_2];
 `;
   writeFileSync(join(ROOT, "app", "herbs.ts"), ts);
 

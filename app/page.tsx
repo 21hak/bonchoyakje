@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HERBS } from "./herbs";
 import {
   CATEGORIES,
+  CATEGORIES_2,
   LOOKALIKE_SETS,
   GROUPED_ORDER,
   groupIds,
@@ -24,6 +25,7 @@ function mod(n: number, m: number) {
 const HERB_IDS = new Set(HERBS.map((h) => h.id));
 
 type OrderMode = "default" | "group";
+type Semester = 1 | 2 | "all";
 
 type SavedState = {
   order: number[];
@@ -34,6 +36,7 @@ type SavedState = {
   favorites: number[];
   favoritesOnly: boolean;
   category: string;
+  semester: Semester;
 };
 
 function defaultOrder(): number[] {
@@ -46,10 +49,9 @@ function groupedOrder(): number[] {
   const indices = GROUPED_ORDER.map((id) => idToIndex.get(id)).filter(
     (i): i is number => i !== undefined
   );
-  // 안전장치: 전체를 1회씩 덮지 못하면 기본 순서로 폴백
-  return indices.length === HERBS.length
-    ? indices
-    : defaultOrder();
+  // 닮은꼴 세트가 없는 약재(2학기)는 뒤에 기본 순서로 이어붙임
+  const inSet = new Set(indices);
+  return [...indices, ...defaultOrder().filter((i) => !inSet.has(i))];
 }
 
 // Fisher–Yates 셔플 (원본 불변)
@@ -70,7 +72,9 @@ function groupedShuffle(): number[] {
   const indices = ids
     .map((id) => idToIndex.get(id))
     .filter((i): i is number => i !== undefined);
-  return indices.length === HERBS.length ? indices : defaultOrder();
+  // 닮은꼴 세트가 없는 약재(2학기)는 개별로 섞어 뒤에 이어붙임
+  const inSet = new Set(indices);
+  return [...indices, ...shuffle(defaultOrder().filter((i) => !inSet.has(i)))];
 }
 
 function loadState(): SavedState | null {
@@ -78,14 +82,12 @@ function loadState(): SavedState | null {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const s = JSON.parse(raw) as Partial<SavedState>;
-    // order 유효성 검사: 길이/내용이 현재 HERBS와 일치해야 함
-    if (
-      !Array.isArray(s.order) ||
-      s.order.length !== HERBS.length ||
-      !s.order.every((n) => Number.isInteger(n) && n >= 0 && n < HERBS.length)
-    ) {
-      return null;
-    }
+    // order 유효성 검사: 길이/내용이 현재 HERBS와 일치해야 함.
+    // 불일치(약재 추가 등)면 순서만 초기화하고 나머지 설정은 유지.
+    const orderValid =
+      Array.isArray(s.order) &&
+      s.order.length === HERBS.length &&
+      s.order.every((n) => Number.isInteger(n) && n >= 0 && n < HERBS.length);
     // 즐겨찾기: 유효한 약재 id만 통과
     const favorites = Array.isArray(s.favorites)
       ? s.favorites.filter((n) => Number.isInteger(n) && HERB_IDS.has(n))
@@ -97,17 +99,18 @@ function loadState(): SavedState | null {
     const shuffled =
       typeof s.shuffled === "boolean" ? s.shuffled : rawMode === "shuffle";
     return {
-      order: s.order,
-      orderMode,
-      shuffled,
+      order: orderValid ? (s.order as number[]) : defaultOrder(),
+      orderMode: orderValid ? orderMode : "default",
+      shuffled: orderValid ? shuffled : false,
       showAnswer: Boolean(s.showAnswer),
-      pos: Number.isInteger(s.pos) ? (s.pos as number) : 0,
+      pos: orderValid && Number.isInteger(s.pos) ? (s.pos as number) : 0,
       favorites,
       favoritesOnly: Boolean(s.favoritesOnly),
       category:
         typeof s.category === "string" && isGroupKey(s.category)
           ? s.category
           : "",
+      semester: s.semester === 1 || s.semester === "all" ? s.semester : 2,
     };
   } catch {
     return null;
@@ -125,6 +128,7 @@ export default function Page() {
   const [favorites, setFavorites] = useState<number[]>([]);
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [category, setCategory] = useState<string>(""); // ""=전체
+  const [semester, setSemester] = useState<Semester>(2);
 
   // 목록 오버레이 (휘발성 UI 상태 — localStorage 저장 안 함)
   const [listOpen, setListOpen] = useState(false);
@@ -164,6 +168,7 @@ export default function Page() {
       setFavorites(s.favorites);
       setFavoritesOnly(s.favoritesOnly);
       setCategory(s.category);
+      setSemester(s.semester);
     }
     setMounted(true);
   }, []);
@@ -180,15 +185,20 @@ export default function Page() {
       favorites,
       favoritesOnly,
       category,
+      semester,
     };
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
     } catch {
       // 저장 실패는 무시
     }
-  }, [mounted, order, orderMode, shuffled, showAnswer, pos, favorites, favoritesOnly, category]);
+  }, [mounted, order, orderMode, shuffled, showAnswer, pos, favorites, favoritesOnly, category, semester]);
 
-  // 활성 덱: 분류 + 즐겨찾기만 보기 필터를 합성
+  // 활성 덱: 학기 + 분류 + 즐겨찾기만 보기 필터를 합성
+  const inSemester = useCallback(
+    (i: number) => semester === "all" || HERBS[i].semester === semester,
+    [semester]
+  );
   const favSet = useMemo(() => new Set(favorites), [favorites]);
   const catSet = useMemo(() => (category ? groupIds(category) : null), [category]);
   const catShort = useMemo(() => groupShortLabel(category), [category]);
@@ -197,10 +207,11 @@ export default function Page() {
     () =>
       order.filter(
         (i) =>
+          inSemester(i) &&
           (!favoritesOnly || favSet.has(HERBS[i].id)) &&
           (!catSet || catSet.has(HERBS[i].id))
       ),
-    [favoritesOnly, order, favSet, catSet]
+    [favoritesOnly, order, favSet, catSet, inSemester]
   );
 
   const len = activeOrder.length;
@@ -217,6 +228,7 @@ export default function Page() {
   const listResults = useMemo(() => {
     const q = query.trim().toLowerCase().replace(/\s+/g, "");
     return HERBS.filter((h) => {
+      if (semester !== "all" && h.semester !== semester) return false;
       if (listTab === "fav" && !favSet.has(h.id)) return false;
       if (listCatSet && !listCatSet.has(h.id)) return false;
       if (!q) return true;
@@ -225,7 +237,7 @@ export default function Page() {
         h.hanja.toLowerCase().includes(q)
       );
     });
-  }, [query, listTab, favSet, listCatSet]);
+  }, [query, listTab, favSet, listCatSet, semester]);
 
   // Carousel 전환: 다음(+1)이면 다음 슬라이드(+W)를 중앙으로 → 그룹 -W로 애니메이션.
   // delta 0 = 제자리 스냅백. transitionEnd 에서 pos 커밋 + dragX 리셋(깜빡임/점프 없음).
@@ -272,14 +284,16 @@ export default function Page() {
     (id: number) => {
       // 즐겨찾기만 보기인데 대상이 즐겨찾기가 아니면 전체 보기로 전환
       const fo = favoritesOnly && favSet.has(id);
-      const deck = fo ? order.filter((i) => favSet.has(HERBS[i].id)) : order;
+      const deck = order.filter(
+        (i) => inSemester(i) && (!fo || favSet.has(HERBS[i].id))
+      );
       const target = deck.findIndex((i) => HERBS[i].id === id);
       setFavoritesOnly(fo);
       setPos(target >= 0 ? target : 0);
       setRevealed(showAnswer);
       setListOpen(false);
     },
-    [favoritesOnly, favSet, order, showAnswer]
+    [favoritesOnly, favSet, order, showAnswer, inSemester]
   );
 
   // 키보드: ← → 이동, f 즐겨찾기 토글 (목록 열림 중엔 Esc만)
@@ -343,6 +357,15 @@ export default function Page() {
     setRevealed(showAnswer);
   };
 
+  // 학기 변경: 다른 학기의 분류는 맞지 않으므로 분류 필터 초기화
+  const onChangeSemester = (s: Semester) => {
+    setSemester(s);
+    setCategory("");
+    setListCategory("");
+    setPos(0);
+    setRevealed(showAnswer);
+  };
+
   const onToggleShowAnswer = (checked: boolean) => {
     setShowAnswer(checked);
     setRevealed(checked);
@@ -395,6 +418,31 @@ export default function Page() {
         <div className="flex items-center justify-between gap-3">
           <h1 className="text-lg font-semibold">약재 한자 퀴즈</h1>
           <div className="flex items-center gap-2">
+            <div className="flex overflow-hidden rounded-md border border-neutral-300 dark:border-neutral-700">
+              {(
+                [
+                  { value: 1, label: "1학기" },
+                  { value: 2, label: "2학기" },
+                  { value: "all", label: "전체" },
+                ] as const
+              ).map((seg, i) => (
+                <button
+                  key={seg.value}
+                  type="button"
+                  onClick={() => onChangeSemester(seg.value)}
+                  aria-pressed={semester === seg.value}
+                  className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                    i > 0 ? "border-l border-neutral-300 dark:border-neutral-700" : ""
+                  } ${
+                    semester === seg.value
+                      ? "bg-neutral-800 text-white dark:bg-neutral-200 dark:text-neutral-900"
+                      : "bg-white hover:bg-neutral-100 dark:bg-neutral-900 dark:hover:bg-neutral-800"
+                  }`}
+                >
+                  {seg.label}
+                </button>
+              ))}
+            </div>
             <button
               type="button"
               onClick={() => setExamOpen(true)}
@@ -422,20 +470,7 @@ export default function Page() {
             className="max-w-52 rounded-md border border-neutral-300 bg-white px-2 py-1.5 text-sm font-medium outline-none transition-colors hover:bg-neutral-100 focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-900 dark:hover:bg-neutral-800"
           >
             <option value="">전체 보기</option>
-            <optgroup label="닮은꼴 세트">
-              {LOOKALIKE_SETS.map((s) => (
-                <option key={s.key} value={s.key}>
-                  {s.label} ({s.ids.length})
-                </option>
-              ))}
-            </optgroup>
-            <optgroup label="효능 분류">
-              {CATEGORIES.map((c) => (
-                <option key={c.key} value={c.key}>
-                  {c.label}
-                </option>
-              ))}
-            </optgroup>
+            <CategoryOptions semester={semester} />
           </select>
           <button
             type="button"
@@ -463,6 +498,8 @@ export default function Page() {
                   key={seg.mode}
                   type="button"
                   onClick={seg.onClick}
+                  disabled={seg.mode === "group" && semester === 2}
+                  title={seg.mode === "group" && semester === 2 ? "2학기는 닮은꼴 세트가 없습니다" : undefined}
                   aria-pressed={orderMode === seg.mode}
                   className={`px-3 py-1.5 text-sm font-medium transition-colors ${
                     i > 0 ? "border-l border-neutral-300 dark:border-neutral-700" : ""
@@ -470,7 +507,7 @@ export default function Page() {
                     orderMode === seg.mode
                       ? "bg-neutral-800 text-white dark:bg-neutral-200 dark:text-neutral-900"
                       : "bg-white hover:bg-neutral-100 dark:bg-neutral-900 dark:hover:bg-neutral-800"
-                  }`}
+                  } disabled:cursor-not-allowed disabled:opacity-40`}
                 >
                   {seg.label}
                 </button>
@@ -511,7 +548,7 @@ export default function Page() {
               {idx + 1} / {len}
             </span>
             <span>
-              {herb.week}주차
+              {herb.week ? `${herb.week}주차` : "2학기"}
               {catShort ? ` · ${catShort}` : ""}
               {favoritesOnly ? " · 즐겨찾기" : ""}
               {orderMode === "group" ? " · 묶음" : ""}
@@ -657,7 +694,7 @@ export default function Page() {
                       : "hover:bg-neutral-100 dark:hover:bg-neutral-800"
                   }`}
                 >
-                  전체 ({HERBS.length})
+                  전체 ({HERBS.filter((h) => semester === "all" || h.semester === semester).length})
                 </button>
                 <button
                   type="button"
@@ -698,20 +735,7 @@ export default function Page() {
                 className="w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-900"
               >
                 <option value="">전체 분류</option>
-                <optgroup label="닮은꼴 세트">
-                  {LOOKALIKE_SETS.map((s) => (
-                    <option key={s.key} value={s.key}>
-                      {s.label} ({s.ids.length})
-                    </option>
-                  ))}
-                </optgroup>
-                <optgroup label="효능 분류">
-                  {CATEGORIES.map((c) => (
-                    <option key={c.key} value={c.key}>
-                      {c.label}
-                    </option>
-                  ))}
-                </optgroup>
+                <CategoryOptions semester={semester} />
               </select>
             </div>
 
@@ -746,7 +770,7 @@ export default function Page() {
                               {h.hanja}
                             </span>
                             <span className="block truncate text-sm text-neutral-500">
-                              {h.korean} · {h.week}주차
+                              {h.korean} · {h.week ? `${h.week}주차` : "2학기"}
                             </span>
                           </span>
                         </button>
@@ -773,7 +797,11 @@ export default function Page() {
 
       {/* 시험 오버레이 */}
       {examOpen && (
-        <Exam onClose={() => setExamOpen(false)} favorites={favorites} />
+        <Exam
+          onClose={() => setExamOpen(false)}
+          favorites={favorites}
+          semester={semester}
+        />
       )}
       </main>
 
@@ -782,5 +810,40 @@ export default function Page() {
         <WritingPad resetKey={herb ? herb.id : 0} />
       </aside>
     </div>
+  );
+}
+
+// 분류/세트 선택지: 닮은꼴 세트·1학기 분류는 1학기, 2학기 분류는 2학기에 표시
+function CategoryOptions({ semester }: { semester: Semester }) {
+  return (
+    <>
+      {semester !== 2 && (
+        <optgroup label="닮은꼴 세트 (1학기)">
+          {LOOKALIKE_SETS.map((s) => (
+            <option key={s.key} value={s.key}>
+              {s.label} ({s.ids.length})
+            </option>
+          ))}
+        </optgroup>
+      )}
+      {semester !== 2 && (
+        <optgroup label="효능 분류 (1학기)">
+          {CATEGORIES.map((c) => (
+            <option key={c.key} value={c.key}>
+              {c.label}
+            </option>
+          ))}
+        </optgroup>
+      )}
+      {semester !== 1 && (
+        <optgroup label="효능 분류 (2학기)">
+          {CATEGORIES_2.map((c) => (
+            <option key={c.key} value={c.key}>
+              {c.label}
+            </option>
+          ))}
+        </optgroup>
+      )}
+    </>
   );
 }

@@ -27,9 +27,11 @@ function chunk(arr: number[], size: number): number[][] {
 export default function Exam({
   onClose,
   favorites,
+  semester,
 }: {
   onClose: () => void;
   favorites: number[];
+  semester: 1 | 2 | "all";
 }) {
   const [phase, setPhase] = useState<Phase>("setup");
 
@@ -40,11 +42,13 @@ export default function Exam({
   const [customCount, setCustomCount] = useState(20);
   const [favOnly, setFavOnly] = useState(false);
 
-  // 출제 풀(약재 인덱스): 즐겨찾기만이면 즐겨찾기한 약재로 한정
+  // 출제 풀(약재 인덱스): 선택한 학기 + 즐겨찾기만이면 즐겨찾기한 약재로 한정
   const favSet = new Set(favorites);
-  const poolIdx = favOnly
-    ? HERBS.map((_, i) => i).filter((i) => favSet.has(HERBS[i].id))
-    : HERBS.map((_, i) => i);
+  const poolIdx = HERBS.map((_, i) => i).filter(
+    (i) =>
+      (semester === "all" || HERBS[i].semester === semester) &&
+      (!favOnly || favSet.has(HERBS[i].id))
+  );
 
   // 출제 결과 (약재 인덱스의 라운드별 배열)
   const [rounds, setRounds] = useState<number[][]>([]);
