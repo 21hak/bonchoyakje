@@ -4,7 +4,8 @@
 // pdftotext로 읽히지 않으므로 이름은 아래에 PDF 순서대로 직접 적어 둔다.
 //
 // 필요 도구: poppler (pdfimages, pdfinfo)
-// 실행: node scripts/extract2.mjs "<약재 감별.pdf 경로>"
+// 이어서 "약재감별12종_구간목차_설명추가.pdf"(용토약·외용약 12종)의 사진도 뒤에 추가한다.
+// 실행: node scripts/extract2.mjs "<약재 감별.pdf 경로>" "<약재감별12종_구간목차_설명추가.pdf 경로>"
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
@@ -112,9 +113,38 @@ const NAMES = [
   ["海螵蛸", "해표초"],
 ];
 
+// 12종 PDF: [사진 페이지, 한자, 한글] (1·10쪽은 목차, 이름은 사진 다음 페이지)
+const EXTRA = [
+  [2, "瓜蒂", "과체"],
+  [4, "常山", "상산"],
+  [6, "膽礬", "담반"],
+  [8, "藜蘆", "여로"],
+  [11, "硫黃", "유황"],
+  [13, "雄黃", "웅황"],
+  [15, "鉛丹", "연단"],
+  [17, "硼砂", "붕사"],
+  [19, "斑蝥", "반모"],
+  [21, "露蜂房", "노봉방"],
+  [23, "大風子", "대풍자"],
+  [25, "木槿皮", "목근피"],
+];
+
+// pdfPath 의 page 쪽 사진을 herbs/<id>.jpg 로 저장
+function extractImage(pdfPath, page, id) {
+  const prefix = join(OUT_IMG_DIR, `tmp_${id}`);
+  execFileSync("pdfimages", ["-f", String(page), "-l", String(page), "-j", pdfPath, prefix]);
+  const produced = `${prefix}-000.jpg`;
+  if (!existsSync(produced)) throw new Error(`사진 추출 실패 (${pdfPath} page ${page})`);
+  const finalName = `${id}.jpg`;
+  renameSync(produced, join(OUT_IMG_DIR, finalName));
+  return `/herbs/${finalName}`;
+}
+
 function main() {
-  const pdfPath = process.argv[2];
-  if (!pdfPath || !existsSync(pdfPath)) throw new Error(`PDF 경로를 인자로 주세요: ${pdfPath}`);
+  const [pdfPath, extraPdfPath] = process.argv.slice(2);
+  for (const p of [pdfPath, extraPdfPath]) {
+    if (!p || !existsSync(p)) throw new Error(`PDF 경로 2개를 인자로 주세요: ${p}`);
+  }
 
   const info = execFileSync("pdfinfo", [pdfPath], { encoding: "utf8" });
   const pageCount = Number(info.match(/Pages:\s+(\d+)/)[1]);
@@ -126,13 +156,11 @@ function main() {
   const herbs = NAMES.map(([hanja, korean], i) => {
     const id = FIRST_ID + i;
     const page = i * 2 + 1; // 사진 = 홀수 페이지
-    const prefix = join(OUT_IMG_DIR, `tmp_${id}`);
-    execFileSync("pdfimages", ["-f", String(page), "-l", String(page), "-j", pdfPath, prefix]);
-    const produced = `${prefix}-000.jpg`;
-    if (!existsSync(produced)) throw new Error(`사진 추출 실패 (page ${page})`);
-    const finalName = `${id}.jpg`;
-    renameSync(produced, join(OUT_IMG_DIR, finalName));
-    return { id, img: `/herbs/${finalName}`, hanja: hanja.normalize("NFC"), korean };
+    return { id, img: extractImage(pdfPath, page, id), hanja: hanja.normalize("NFC"), korean };
+  });
+  EXTRA.forEach(([page, hanja, korean], i) => {
+    const id = FIRST_ID + NAMES.length + i;
+    herbs.push({ id, img: extractImage(extraPdfPath, page, id), hanja, korean });
   });
 
   const lines = herbs.map(

@@ -25,7 +25,7 @@ export const CATEGORIES: Category[] = [
   { key: "pyeonggan", label: "평간약·평간식풍약 (平肝藥·平肝息風藥)", start: 125, end: 126 },
 ];
 
-// 2학기 효능분류 (전체약재목록 기준, herbs2.ts 순서 = id 127..219).
+// 2학기 효능분류 (전체약재목록 기준, herbs2.ts 순서 = id 127..231).
 export const CATEGORIES_2: Category[] = [
   { key: "s2:pyeonggan-sikpung", label: "평간약·평간식풍약 (平肝藥·平肝息風藥)", start: 127, end: 131 },
   { key: "s2:pyeonggan-jamyang", label: "평간약·평간잠양약 (平肝藥·平肝潛陽藥)", start: 132, end: 136 },
@@ -37,6 +37,8 @@ export const CATEGORIES_2: Category[] = [
   { key: "s2:jihan", label: "수삽약·지한약 (收澁藥·止汗藥)", start: 201, end: 203 },
   { key: "s2:jisa", label: "수삽약·지사약 (收澁藥·止瀉藥)", start: 204, end: 211 },
   { key: "s2:samjeong", label: "수삽약·삽정축뇨지대약 (收澁藥·澁精縮尿止帶藥)", start: 212, end: 219 },
+  { key: "s2:yongto", label: "용토약 (湧吐藥)", start: 220, end: 223 },
+  { key: "s2:oeyong", label: "외용약 (外用藥)", start: 224, end: 231 },
 ];
 
 const BY_KEY = new Map([...CATEGORIES, ...CATEGORIES_2].map((c) => [c.key, c]));
