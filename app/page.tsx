@@ -200,6 +200,12 @@ export default function Page() {
     [semester]
   );
   const favSet = useMemo(() => new Set(favorites), [favorites]);
+  // 선택한 학기의 즐겨찾기 개수 (표시용)
+  const favCount = useMemo(
+    () =>
+      HERBS.filter((h, i) => inSemester(i) && favSet.has(h.id)).length,
+    [favSet, inSemester]
+  );
   const catSet = useMemo(() => (category ? groupIds(category) : null), [category]);
   const catShort = useMemo(() => groupShortLabel(category), [category]);
   const selectedTip = useMemo(() => groupTip(category), [category]);
@@ -494,7 +500,7 @@ export default function Page() {
                 : "border-neutral-300 bg-white hover:bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-900 dark:hover:bg-neutral-800"
             }`}
           >
-            ★ 즐겨찾기만 ({favorites.length})
+            ★ 즐겨찾기만 ({favCount})
           </button>
 
           {/* 구분선 + 우측: 보기 컨트롤 (남는 공간 오른쪽 정렬) */}
@@ -718,7 +724,7 @@ export default function Page() {
                       : "hover:bg-neutral-100 dark:hover:bg-neutral-800"
                   }`}
                 >
-                  ★ 즐겨찾기 ({favorites.length})
+                  ★ 즐겨찾기 ({favCount})
                 </button>
               </div>
               {listTab === "fav" && (
@@ -765,7 +771,7 @@ export default function Page() {
             <div className="min-h-0 flex-1 overflow-y-auto">
               {listResults.length === 0 ? (
                 <p className="p-8 text-center text-sm text-neutral-400">
-                  {listTab === "fav" && favorites.length === 0
+                  {listTab === "fav" && favCount === 0
                     ? "즐겨찾기한 약재가 없습니다."
                     : "검색 결과가 없습니다."}
                 </p>
