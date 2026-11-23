@@ -345,6 +345,19 @@ export default function Page() {
     setRevealed(showAnswer);
   };
 
+  // 즐겨찾기 초기화: 현재 선택한 학기의 즐겨찾기만 지움 (전체면 모두)
+  const clearFavorites = () => {
+    const targets = favorites.filter(
+      (id) => semester === "all" || HERBS.find((h) => h.id === id)?.semester === semester
+    );
+    if (targets.length === 0) return;
+    const scope = semester === "all" ? "전체" : `${semester}학기`;
+    if (!window.confirm(`${scope} 즐겨찾기 ${targets.length}개를 모두 지울까요?`)) return;
+    setFavorites((prev) => prev.filter((id) => !targets.includes(id)));
+    setPos(0);
+    setRevealed(showAnswer);
+  };
+
   const toggleFavoritesOnly = () => {
     setFavoritesOnly((v) => !v);
     setPos(0);
@@ -708,6 +721,15 @@ export default function Page() {
                   ★ 즐겨찾기 ({favorites.length})
                 </button>
               </div>
+              {listTab === "fav" && (
+                <button
+                  type="button"
+                  onClick={clearFavorites}
+                  className="ml-auto rounded-md px-3 py-1.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+                >
+                  즐겨찾기 초기화
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setListOpen(false)}
