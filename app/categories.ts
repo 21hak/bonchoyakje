@@ -5,6 +5,7 @@ export type Category = {
   label: string;
   start: number; // herb id (포함)
   end: number; // herb id (포함)
+  extra?: number[]; // 범위 밖에 추가된 herb id
 };
 
 export const CATEGORIES: Category[] = [
@@ -25,11 +26,11 @@ export const CATEGORIES: Category[] = [
   { key: "pyeonggan", label: "평간약·평간식풍약 (平肝藥·平肝息風藥)", start: 125, end: 126 },
 ];
 
-// 2학기 효능분류 (전체약재목록 기준, herbs2.ts 순서 = id 127..231).
+// 2학기 효능분류 (전체약재목록 기준, herbs2.ts 순서 = id 127..231, 섬수=232).
 export const CATEGORIES_2: Category[] = [
   { key: "s2:pyeonggan-sikpung", label: "평간약·평간식풍약 (平肝藥·平肝息風藥)", start: 127, end: 131 },
   { key: "s2:pyeonggan-jamyang", label: "평간약·평간잠양약 (平肝藥·平肝潛陽藥)", start: 132, end: 136 },
-  { key: "s2:gaegyu", label: "개규약 (開竅藥)", start: 137, end: 142 },
+  { key: "s2:gaegyu", label: "개규약 (開竅藥)", start: 137, end: 142, extra: [232] }, // 232 = 섬수
   { key: "s2:bogi", label: "보익약·보기약 (補益藥·補氣藥)", start: 143, end: 151 },
   { key: "s2:boyang", label: "보익약·보양약 (補益藥·補陽藥)", start: 152, end: 178 },
   { key: "s2:bohyeol", label: "보익약·보혈약 (補益藥·補血藥)", start: 179, end: 185 },
@@ -49,6 +50,7 @@ export function categoryIds(key: string): Set<number> {
   if (!c) return new Set();
   const ids = new Set<number>();
   for (let id = c.start; id <= c.end; id++) ids.add(id);
+  c.extra?.forEach((id) => ids.add(id));
   return ids;
 }
 

@@ -17,6 +17,7 @@ export const HERBS_2: Herb[] = [
   { id: 139, img: "/herbs/139.jpg", hanja: "石菖蒲", korean: "석창포", semester: 2 },
   { id: 140, img: "/herbs/140.jpg", hanja: "蘇合香", korean: "소합향", semester: 2 },
   { id: 141, img: "/herbs/141.jpg", hanja: "安息香", korean: "안식향", semester: 2 },
+  { id: 232, img: "/herbs/232.jpg", hanja: "蟾酥", korean: "섬수", semester: 2 },
   { id: 142, img: "/herbs/142.jpg", hanja: "樟腦", korean: "장뇌", semester: 2 },
   { id: 143, img: "/herbs/143.jpg", hanja: "人蔘", korean: "인삼", semester: 2 },
   { id: 144, img: "/herbs/144.jpg", hanja: "黨蔘", korean: "당삼", semester: 2 },

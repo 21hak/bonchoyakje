@@ -162,6 +162,10 @@ function main() {
     const id = FIRST_ID + NAMES.length + i;
     herbs.push({ id, img: extractImage(extraPdfPath, page, id), hanja, korean });
   });
+  // 섬수: PDF에 없어 사진(public/herbs/232.jpg)을 따로 넣음. 목록 순서대로 안식향 뒤에 끼움
+  // (id는 맨 뒤 번호라 기존 즐겨찾기 id가 밀리지 않음).
+  const after = herbs.findIndex((h) => h.korean === "안식향");
+  herbs.splice(after + 1, 0, { id: 232, img: "/herbs/232.jpg", hanja: "蟾酥", korean: "섬수" });
 
   const lines = herbs.map(
     (h) =>
@@ -177,7 +181,7 @@ ${lines.join("\n")}
 ];
 `;
   writeFileSync(join(ROOT, "app", "herbs2.ts"), ts);
-  console.log(`총 ${herbs.length}개 (id ${FIRST_ID}..${FIRST_ID + herbs.length - 1})`);
+  console.log(`총 ${herbs.length}개`);
 }
 
 main();
